@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Live Face Analysis (Web Version)</title>
+    <!-- We'll use Tailwind CSS for a modern UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- This is the core face-api.js library -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        /* This CSS is crucial to overlay the analysis results on top of the video feed */
+        #video-container {
+            position: relative;
+            width: 720px;
+            height: 560px;
+            overflow: hidden; /* Keep the canvas contained */
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        video {
+            /* The horizontal flip has been removed to ensure direct, non-opposite movement */
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        /* Style for the toggle switch */
+        .dot {
+            transition: transform 0.3s ease-in-out;
+        }
+        input:checked ~ .dot {
+            transform: translateX(1.5rem);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 flex flex-col items-center justify-center min-h-screen text-white font-sans p-4">
+
+    <h1 class="text-3xl font-bold mb-2">Advanced Live Face Analysis</h1>
+    <p id="status" class="text-yellow-400 mb-4 h-6">Loading AI Models...</p>
+
+    <!-- The video stream and the analysis drawings will be placed inside this container -->
+    <div id="video-container" class="bg-black rounded-lg shadow-2xl mb-4 border-2 border-gray-700">
+        <video id="video" width="720" height="560" autoplay muted playsinline></video>
+    </div>
+
+    <!-- Controls -->
+    <div class="flex items-center space-x-6">
+        <label for="landmarks-toggle" class="flex items-center cursor-pointer">
+            <span class="mr-3 text-lg">Show Facial Landmarks:</span>
+            <div class="relative">
+                <input type="checkbox" id="landmarks-toggle" class="sr-only" checked>
+                <div class="block bg-gray-600 w-14 h-8 rounded-full"></div>
+                <div class="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full"></div>
+            </div>
+        </label>
+         <button id="stop-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 text-lg">
+            Stop Camera
+        </button>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const statusText = document.getElementById('status');
+        const videoContainer = document.getElementById('video-container');
+        const landmarksToggle = document.getElementById('landmarks-toggle');
+        const stopBtn = document.getElementById('stop-btn');
+
+        let detectionInterval;
+        async function loadModels() {
+            const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
+            try {
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+                    faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL)
+                ]);
+            } catch (error) {
+                statusText.textContent = 'Error loading models. Please check the console.';
+                console.error("Model loading failed:", error);
+            }
+        }
+        async function startWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+            } catch (error) {
+                statusText.textContent = 'Error: Could not access the camera. Please grant permission.';
+                console.error("Camera access failed:", error);
+            }
+        }
+        video.addEventListener('play', () => {
+            const canvas = faceapi.createCanvasFromMedia(video);
+            videoContainer.append(canvas);
+            
+            const displaySize = { width: video.width, height: video.height };
+            faceapi.matchDimensions(canvas, displaySize);
+            
+            statusText.textContent = "Live analysis running...";
+
+            detectionInterval = setInterval(async () => {
+               
+                const tinyFaceDetectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 320 });
+                
+            
+                const detections = await faceapi.detectAllFaces(video, tinyFaceDetectorOptions)
+                    .withFaceLandmarks()
+                    .withFaceExpressions()
+                    .withAgeAndGender();
+                
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+
+                // Draw the detection boxes
+                faceapi.draw.drawDetections(canvas, resizedDetections);
+
+                // Check the toggle and draw landmarks if enabled
+                if (landmarksToggle.checked) {
+                    faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+                }
+
+                // Draw expression and gender information for each detected face
+                resizedDetections.forEach(detection => {
+                    const { age, gender, genderProbability, expressions } = detection;
+                    
+                    // Find the most likely expression by finding the one with the highest confidence score
+                    const maxExpression = Object.keys(expressions).reduce((a, b) => expressions[a] > expressions[b] ? a : b);
+                    
+                    // Prepare the text to display
+                    const text = [
+                        `${gender} (${Math.round(genderProbability * 100)}%)`,
+                        `${maxExpression}`
+                    ];
+                    
+                    // Draw the text on the canvas just below the detection box
+                    new faceapi.draw.DrawTextField(text, detection.detection.box.bottomLeft).draw(canvas);
+                });
+
+            }, 100);// Run every 100 milliseconds
+        });
+
+        // Function to stop the webcam and the analysis interval
+        function stopWebcam() {
+            if (detectionInterval) clearInterval(detectionInterval);
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+            statusText.textContent = "Camera stopped.";
+            const canvas = document.querySelector('canvas');
+            if(canvas) canvas.getContext('2d').clearRect(0,0,canvas.width, canvas.height);
+        }
+
+        stopBtn.addEventListener('click', stopWebcam);
+        
+        // --- Main execution starts here ---
+        async function main() {
+            await loadModels();
+            statusText.textContent = 'Models Loaded. Starting Webcam...';
+            await startWebcam();
+        }
+
+        main();
+    </script>
+</body>
+</html>
+
