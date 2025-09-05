@@ -4,6 +4,6 @@ This is a web-based, real-time face analysis application that runs entirely in t
 
 **How to Run**
 
-1.  Download the `face_detection_web.html` file.
-2.  Open the file in a modern web browser (like Chrome or Firefox).
-3.  Allow the browser to access your webcam when prompted.
+1.  Download the `recognition.html` file.
+3.  Open the file in a modern web browser (like Chrome or Firefox).
+4.  Allow the browser to access your webcam when prompted.
